@@ -376,5 +376,5 @@ export class Module {
 
   declare static customSections: (moduleObject: Module, sectionName: string) => ArrayBuffer[]
   declare static exports: (moduleObject: Module) => WebAssembly.ModuleExportDescriptor[]
-  public declare static imports: (moduleObject: Module) => WebAssembly.ModuleImportDescriptor[]
+  static imports: (moduleObject: Module) => WebAssembly.ModuleImportDescriptor[]
 }
