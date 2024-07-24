@@ -376,5 +376,27 @@ export class Module {
 
   declare static customSections: (moduleObject: Module, sectionName: string) => ArrayBuffer[]
   declare static exports: (moduleObject: Module) => WebAssembly.ModuleExportDescriptor[]
-  static imports: (moduleObject: Module) => WebAssembly.ModuleImportDescriptor[]
+
+  private static desc_to_imp_exp_kind(desc: Desc): WebAssembly.ImportExportKind {
+    switch (desc) {
+      case Desc.Func:
+        return "function";
+      case Desc.Global:
+        return "global";
+      case Desc.Mem:
+        return "memory";
+      case Desc.Table:
+        return "table";
+    }
+  }
+  static imports(moduleObject: Module): WebAssembly.ModuleImportDescriptor[] {
+    let importSection = moduleMap.get(moduleObject)?.importSection_;
+    let res = [];
+    for (let key in importSection) {
+      let num_key: number = +key;
+      let val: ImportItem = importSection[num_key];
+      res.push({kind: Module.desc_to_imp_exp_kind(val[2]), module: val[0], name: val[1]});
+    }
+    return res;
+  }
 }
