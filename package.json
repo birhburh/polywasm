@@ -4,10 +4,10 @@
   "type": "module",
   "main": "./index.js",
   "license": "MIT",
-  "homepage": "https://github.com/evanw/polywasm",
+  "homepage": "https://github.com/birhburh/polywasm",
   "repository": {
     "type": "git",
-    "url": "https://github.com/evanw/polywasm.git"
+    "url": "https://github.com/birhburh/polywasm.git"
   },
   "scripts": {
     "build": "esbuild --bundle --target=es2020 src/index.ts \"--mangle-props=_$\" --minify --outfile=index.min.js --format=esm && esbuild --bundle --target=es2020 src/index.ts --outfile=index.js \"--mangle-props=_$\" --format=esm",

@@ -7,10 +7,15 @@ const instantiate = async (input: any, importObject?: WebAssembly.Imports): Prom
   return { module, instance: new Instance(module, importObject) }
 }
 
+const compile = async (input: any): Promise<Module> => {
+  return new Module(input)
+}
+
 const wasmAPI: Partial<typeof WebAssembly> = {
   Global,
   Instance,
   instantiate,
+  compile,
   Memory,
   Module,
   Table,
