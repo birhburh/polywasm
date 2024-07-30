@@ -1,6 +1,7 @@
 import { castToJS, castToWASM, compileCode, liveCastToWASM } from './compile'
 import { createLibrary } from './library'
 import { Desc, FuncType, Module, Type, moduleMap } from './parse'
+import JSBI from 'jsbi';
 
 export class Global {
   declare value: any
@@ -87,7 +88,7 @@ export class Instance {
     const exports: WebAssembly.Exports = this.exports = {}
     const funcs: Function[] = []
     const funcTypes: FuncType[] = []
-    const globals: (number | bigint)[] = []
+    const globals: (number | JSBI)[] = []
     const globalTypes: Type[] = []
     const tables: (Function | null)[][] = []
     const library = createLibrary()

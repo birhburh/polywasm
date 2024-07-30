@@ -1,3 +1,7 @@
+import JSBI from 'jsbi';
+
+globalThis.JSBI = JSBI;
+
 export type Library = ReturnType<typeof createLibrary>
 
 export const createLibrary = () => {
@@ -5,16 +9,16 @@ export const createLibrary = () => {
   const f32 = new Float32Array(buffer)
   const f64 = new Float64Array(buffer)
   const i32 = new Int32Array(buffer)
-  const i64 = new BigInt64Array(buffer)
-  const u64 = new BigUint64Array(buffer)
+  const i64 = new DataView(buffer)
+  const u64 = new DataView(buffer)
 
   return {
     copysign_(x: number, y: number): number {
       return (x < 0 || (x === 0 && Object.is(x, -0))) !== (y < 0 || (y === 0 && Object.is(y, -0))) ? -x : x
     },
-    u64_to_s64_(x: bigint): bigint {
-      u64[0] = x
-      return i64[0]
+    u64_to_s64_(x: JSBI): JSBI {
+      JSBI.DataViewSetBigUint64(u64, 0, x)
+      return JSBI.DataViewGetBigInt64(i64, 0)
     },
     i32_reinterpret_f32_(x: number): number {
       f32[0] = x
@@ -24,12 +28,12 @@ export const createLibrary = () => {
       i32[0] = x
       return f32[0]
     },
-    i64_reinterpret_f64_(x: number): bigint {
+    i64_reinterpret_f64_(x: number): JSBI {
       f64[0] = x
-      return u64[0]
+      return JSBI.DataViewGetBigUint64(u64, 0)
     },
-    f64_reinterpret_i64_(x: bigint): number {
-      u64[0] = x
+    f64_reinterpret_i64_(x: JSBI): number {
+      JSBI.DataViewSetBigUint64(u64, 0, x);
       return f64[0]
     },
     i32_rotl_(x: number, y: number) {
@@ -38,13 +42,13 @@ export const createLibrary = () => {
     i32_rotr_(x: number, y: number) {
       return x >>> y | x << 32 - y
     },
-    i64_rotl_(x: bigint, y: bigint) {
+    i64_rotl_(x: JSBI, y: JSBI) {
       // Note: "y" is already "y & 63n" from the caller
-      return (x << y | x >> 64n - y) & 0xFFFF_FFFF_FFFF_FFFFn
+      return JSBI.bitwiseAnd(JSBI.bitwiseOr(JSBI.leftShift(x, y), JSBI.signedRightShift(x, JSBI.subtract(JSBI.BigInt(64), y))), JSBI.BigInt('0xFFFFFFFFFFFFFFFF'))
     },
-    i64_rotr_(x: bigint, y: bigint) {
+    i64_rotr_(x: JSBI, y: JSBI) {
       // Note: "y" is already "y & 63n" from the caller
-      return (x >> y | x << 64n - y) & 0xFFFF_FFFF_FFFF_FFFFn
+      return JSBI.bitwiseAnd((JSBI.bitwiseOr(JSBI.signedRightShift(x, y), JSBI.leftShift(x, JSBI.subtract(JSBI.BigInt(64), y)))), JSBI.BigInt('0xFFFFFFFFFFFFFFFF'))
     },
     i32_ctz_(x: number): number {
       return x ? Math.clz32(x & -x) ^ 31 : 32
@@ -57,22 +61,22 @@ export const createLibrary = () => {
       }
       return count
     },
-    i64_clz_(x: bigint): bigint {
-      let count = Math.clz32(Number((x >> 32n) & 0xFFFF_FFFFn))
-      if (count === 32) count += Math.clz32(Number(x & 0xFFFF_FFFFn))
-      return BigInt(count)
+    i64_clz_(x: JSBI): JSBI {
+      let count = Math.clz32(JSBI.toNumber(JSBI.bitwiseAnd(JSBI.signedRightShift(x, JSBI.BigInt(32)), JSBI.BigInt(0xFFFF_FFFF))))
+      if (count === 32) count += Math.clz32(JSBI.toNumber(JSBI.bitwiseAnd(x, JSBI.BigInt(0xFFFF_FFFF))))
+      return JSBI.BigInt(count)
     },
-    i64_ctz_(x: bigint): bigint {
-      let y = Number(x & 0xFFFF_FFFFn)
-      if (y) return BigInt(Math.clz32(y & -y) ^ 31)
-      y = Number((x >> 32n) & 0xFFFF_FFFFn)
-      return y ? BigInt(32 + Math.clz32(y & -y) ^ 31) : 64n
+    i64_ctz_(x: JSBI): JSBI {
+      let y = JSBI.toNumber(JSBI.bitwiseAnd(x, JSBI.BigInt(0xFFFF_FFFF)))
+      if (y) return JSBI.BigInt(Math.clz32(y & -y) ^ 31)
+      y = JSBI.toNumber(JSBI.bitwiseAnd(JSBI.signedRightShift(x, JSBI.BigInt(32)), JSBI.BigInt(0xFFFF_FFFF)))
+      return y ? JSBI.BigInt(32 + Math.clz32(y & -y) ^ 31) : JSBI.BigInt(64)
     },
-    i64_popcnt_(x: bigint): bigint {
-      let count = 0n
+    i64_popcnt_(x: JSBI): JSBI {
+      let count = JSBI.BigInt(0)
       while (x) {
-        count++
-        x &= x - 1n
+        count = JSBI.add(count, JSBI.BigInt(1))
+        x = JSBI.bitwiseAnd(x, JSBI.subtract(x, JSBI.BigInt(1)))
       }
       return count
     },
@@ -88,28 +92,28 @@ export const createLibrary = () => {
         x <= 0 ? 0 :
           x | 0
     },
-    i64_trunc_sat_s_(x: number): bigint {
+    i64_trunc_sat_s_(x: number): JSBI {
       x = Math.trunc(x)
-      return x >= 0x7FFF_FFFF_FFFF_FFFF ? 0x7FFF_FFFF_FFFF_FFFFn :
-        x <= -0x8000_0000_0000_0000 ? 0x8000_0000_0000_0000n :
+      return JSBI.GE(JSBI.BigInt(x), JSBI.BigInt('0x7FFFFFFFFFFFFFFF')) ? JSBI.BigInt('0x7FFFFFFFFFFFFFFF') :
+        JSBI.LE(JSBI.BigInt(x), JSBI.unaryMinus(JSBI.BigInt('0x8000000000000000'))) ? JSBI.BigInt('0x8000000000000000') :
           x === x ?
-            BigInt(x) & 0xFFFF_FFFF_FFFF_FFFFn :
-            0n // NaN must become 0
+            JSBI.bitwiseAnd(JSBI.BigInt(x), JSBI.BigInt('0xFFFFFFFFFFFFFFFF')) :
+            JSBI.BigInt(0) // NaN must become 0
     },
-    i64_trunc_sat_u_(x: number): bigint {
+    i64_trunc_sat_u_(x: number): JSBI {
       x = Math.trunc(x)
-      return x >= 0xFFFF_FFFF_FFFF_FFFF ? 0xFFFF_FFFF_FFFF_FFFFn :
-        !(x > 0) ? 0n : // NaN must become 0
-          BigInt(x)
+      return JSBI.GE(JSBI.BigInt(x), JSBI.BigInt('0xFFFFFFFFFFFFFFFF')) ? JSBI.BigInt('0xFFFFFFFFFFFFFFFF') :
+        !(x > 0) ? JSBI.BigInt(0) : // NaN must become 0
+        JSBI.BigInt(x)
     },
-    i64_extend8_s_(x: bigint): bigint {
-      return x & 0x80n ? x | 0xFFFF_FFFF_FFFF_FF00n : x & 0xFFn
+    i64_extend8_s_(x: JSBI): JSBI {
+      return JSBI.bitwiseAnd(x, JSBI.BigInt(0x80)) ? JSBI.bitwiseOr(x, JSBI.BigInt('0xFFFFFFFFFFFFFF00')) : JSBI.bitwiseAnd(x, JSBI.BigInt(0xFF))
     },
-    i64_extend16_s_(x: bigint): bigint {
-      return x & 0x8000n ? x | 0xFFFF_FFFF_FFFF_0000n : x & 0xFFFFn
+    i64_extend16_s_(x: JSBI): JSBI {
+      return JSBI.bitwiseAnd(x, JSBI.BigInt(0x8000)) ? JSBI.bitwiseOr(x, JSBI.BigInt('0xFFFFFFFFFFFF0000')) : JSBI.bitwiseAnd(x, JSBI.BigInt(0xFFFF))
     },
-    i64_extend32_s_(x: bigint): bigint {
-      return x & 0x8000_0000n ? x | 0xFFFF_FFFF_0000_0000n : x & 0xFFFF_FFFFn
+    i64_extend32_s_(x: JSBI): JSBI {
+      return JSBI.bitwiseAnd(x, JSBI.BigInt(0x80000000)) ? JSBI.bitwiseOr(x, JSBI.BigInt('0xFFFFFFFF00000000')) : JSBI.bitwiseAnd(x, JSBI.BigInt(0xFFFFFFFF))
     },
   }
 }

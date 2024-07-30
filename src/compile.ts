@@ -5,6 +5,7 @@ import { Context, ContextField } from './instantiate'
 import { Library } from './library'
 import { compileOptimizations } from './optimize'
 import { FuncType, Type, WASM } from './parse'
+import JSBI from 'jsbi';
 
 export enum Op {
   // These are prefixed by 0xFC
@@ -244,17 +245,17 @@ interface Block {
   returnCount_: number
 }
 
-export const liveCastToWASM = (value: any, type: Type): number | bigint => {
+export const liveCastToWASM = (value: any, type: Type): number | JSBI => {
   if (type === Type.F32 || type === Type.F64) return +value
   if (type === Type.I32) return value | 0
-  if (type === Type.I64) return BigInt(value) & 0xFFFF_FFFF_FFFF_FFFFn
+  if (type === Type.I64) return JSBI.bitwiseAnd(JSBI.BigInt(value), JSBI.BigInt('0xFFFFFFFFFFFFFFFF'))
   throw new Error('Unsupported cast to type ' + type)
 }
 
 export const castToWASM = (code: string, type: Type): string => {
   if (type === Type.F32 || type === Type.F64) return '+' + code
   if (type === Type.I32) return code + '|0'
-  if (type === Type.I64) return `BigInt(${code})&0xFFFFFFFFFFFFFFFFn`
+  if (type === Type.I64) return `JSBI.bitwiseAnd(JSBI.BigInt(${code}), JSBI.BigInt('0xFFFFFFFFFFFFFFFF'))`
   throw new Error('Unsupported cast to type ' + type)
 }
 
@@ -493,7 +494,7 @@ export const compileCode = (
   funcs: Function[],
   funcTypes: FuncType[],
   table: (Function | null)[] | undefined,
-  globals: (number | bigint)[],
+  globals: (number | JSBI)[],
   library: Library,
   context: Context,
   wasm: WASM,
@@ -524,16 +525,16 @@ export const compileCode = (
     return shift < 32 && (byte & 0x40) ? value | (~0 << shift) : value
   }
 
-  const readI64LEB = (): bigint => {
-    let value = 0n
-    let shift = 0n
+  const readI64LEB = (): JSBI => {
+    let value = JSBI.BigInt(0)
+    let shift = JSBI.BigInt(0)
     let byte: number
     do {
       byte = bytes[bytesPtr++]
-      value |= BigInt(byte & 0x7F) << shift
-      shift += 7n
+      value = JSBI.bitwiseOr(value, JSBI.leftShift(JSBI.BigInt(byte & 0x7F), shift))
+      shift = JSBI.add(shift, JSBI.BigInt(7))
     } while (byte & 0x80)
-    return shift < 64 && (byte & 0x40) ? value | (~0n << shift) : value
+    return JSBI.lessThan(shift, JSBI.BigInt(64)) && (byte & 0x40) ? JSBI.bitwiseOr(value, (JSBI.leftShift(JSBI.bitwiseNot(JSBI.BigInt(0)), shift))) : value
   }
 
   const readBlockType = (): [argCount: number, returnCount: number] => {
@@ -562,7 +563,7 @@ export const compileCode = (
   let astNextPtr = 0
 
   // Instructions can reference constants in here by index
-  const constants: bigint[] = []
+  const constants: JSBI[] = []
 
   let stackLimit = 0
   const stackSlotName = (stackSlot: number): string => {
@@ -643,29 +644,29 @@ export const compileCode = (
 
       case Op.i32_load: return load('Int32', ast[ptr + 1], ast[ptr + 2])
       case Op.U32_LOAD: return load('Uint32', ast[ptr + 1], ast[ptr + 2])
-      case Op.i64_load: return load('BigUint64', ast[ptr + 1], ast[ptr + 2])
-      case Op.S64_LOAD: return load('BigInt64', ast[ptr + 1], ast[ptr + 2])
+      case Op.i64_load: return `JSBI.DataViewGetBigUint64(c.${ContextField.DataView}, ${emit(ast[ptr + 1])}${ast[ptr + 2] ? '+' + ast[ptr + 2] : ''},1)`
+      case Op.S64_LOAD: return `JSBI.DataViewGetBigInt64(c.${ContextField.DataView}, ${emit(ast[ptr + 1])}${ast[ptr + 2] ? '+' + ast[ptr + 2] : ''},1)`
       case Op.f32_load: return load('Float32', ast[ptr + 1], ast[ptr + 2])
       case Op.f64_load: return load('Float64', ast[ptr + 1], ast[ptr + 2])
       case Op.i32_load8_s: return load8(ContextField.Int8Array, ast[ptr + 1], ast[ptr + 2])
       case Op.i32_load8_u: return load8(ContextField.Uint8Array, ast[ptr + 1], ast[ptr + 2])
       case Op.i32_load16_s: return load('Int16', ast[ptr + 1], ast[ptr + 2])
       case Op.i32_load16_u: return load('Uint16', ast[ptr + 1], ast[ptr + 2])
-      case Op.i64_load8_s: return `BigInt(${load8(ContextField.Int8Array, ast[ptr + 1], ast[ptr + 2])})&0xFFFFFFFFFFFFFFFFn`
-      case Op.i64_load8_u: return `BigInt(${load8(ContextField.Uint8Array, ast[ptr + 1], ast[ptr + 2])})`
-      case Op.i64_load16_s: return `BigInt(${load('Int16', ast[ptr + 1], ast[ptr + 2])})&0xFFFFFFFFFFFFFFFFn`
-      case Op.i64_load16_u: return `BigInt(${load('Uint16', ast[ptr + 1], ast[ptr + 2])})`
-      case Op.i64_load32_s: return `BigInt(${load('Int32', ast[ptr + 1], ast[ptr + 2])})&0xFFFFFFFFFFFFFFFFn`
-      case Op.i64_load32_u: return `BigInt(${load('Uint32', ast[ptr + 1], ast[ptr + 2])})`
+      case Op.i64_load8_s: return `JSBI.bitwiseAnd(JSBI.BigInt(${load8(ContextField.Int8Array, ast[ptr + 1], ast[ptr + 2])}), JSBI.BigInt('0xFFFFFFFFFFFFFFFF'))`
+      case Op.i64_load8_u: return `JSBI.BigInt(${load8(ContextField.Uint8Array, ast[ptr + 1], ast[ptr + 2])})`
+      case Op.i64_load16_s: return `JSBI.bitwiseAnd(JSBI.BigInt(${load('Int16', ast[ptr + 1], ast[ptr + 2])}), JSBI.BigInt('0xFFFFFFFFFFFFFFFF'))`
+      case Op.i64_load16_u: return `JSBI.BigInt(${load('Uint16', ast[ptr + 1], ast[ptr + 2])})`
+      case Op.i64_load32_s: return `JSBI.bitwiseAnd(JSBI.BigInt(${load('Int32', ast[ptr + 1], ast[ptr + 2])}), JSBI.BigInt('0xFFFFFFFFFFFFFFFF'))`
+      case Op.i64_load32_u: return `JSBI.BigInt(${load('Uint32', ast[ptr + 1], ast[ptr + 2])})`
       case Op.i32_store: return store('Int32', ast[ptr + 1], ast[ptr + 3], emit(ast[ptr + 2]))
-      case Op.i64_store: return store('BigUint64', ast[ptr + 1], ast[ptr + 3], emit(ast[ptr + 2]))
+      case Op.i64_store: return `JSBI.DataViewSetBigUint64(c.${ContextField.DataView}, ${emit(ast[ptr + 1])}${ast[ptr + 3] ? '+' + ast[ptr + 3] : ''},${emit(ast[ptr + 2])},1)`
       case Op.f32_store: return store('Float32', ast[ptr + 1], ast[ptr + 3], emit(ast[ptr + 2]))
       case Op.f64_store: return store('Float64', ast[ptr + 1], ast[ptr + 3], emit(ast[ptr + 2]))
       case Op.i32_store8: return store8(ContextField.Uint8Array, ast[ptr + 1], ast[ptr + 3], emit(ast[ptr + 2]))
       case Op.i32_store16: return store('Int16', ast[ptr + 1], ast[ptr + 3], emit(ast[ptr + 2]))
-      case Op.i64_store8: return store8(ContextField.Uint8Array, ast[ptr + 1], ast[ptr + 3], `Number(${emit(ast[ptr + 2])}&255n)`)
-      case Op.i64_store16: return store('Int16', ast[ptr + 1], ast[ptr + 3], `Number(${emit(ast[ptr + 2])}&65535n)`)
-      case Op.i64_store32: return store('Int32', ast[ptr + 1], ast[ptr + 3], `Number(${emit(ast[ptr + 2])}&0xFFFFFFFFn)`)
+      case Op.i64_store8: return store8(ContextField.Uint8Array, ast[ptr + 1], ast[ptr + 3], `JSBI.toNumber(JSBI.bitwiseAnd(JSBI.BigInt(${emit(ast[ptr + 2])}), JSBI.BigInt(255)))`)
+      case Op.i64_store16: return store('Int16', ast[ptr + 1], ast[ptr + 3], `JSBI.toNumber(JSBI.bitwiseAnd(JSBI.BigInt(${emit(ast[ptr + 2])}), JSBI.BigInt(65535)))`)
+      case Op.i64_store32: return store('Int32', ast[ptr + 1], ast[ptr + 3], `JSBI.toNumber(JSBI.bitwiseAnd(JSBI.BigInt(${emit(ast[ptr + 2])}), JSBI.BigInt(0xFFFFFFFF)))`)
 
       case Op.memory_size: {
         if (ast[ptr + 1]) throw new Error('Unsupported non-zero memory index')
@@ -677,7 +678,7 @@ export const compileCode = (
       }
 
       case Op.i32_const: return ast[ptr + 1] + ''
-      case Op.i64_const: return (constants[ast[ptr + 1]] & 0xFFFF_FFFF_FFFF_FFFFn) + 'n'
+      case Op.i64_const: return "JSBI.BigInt('" + JSBI.bitwiseAnd(constants[ast[ptr + 1]], JSBI.BigInt('0xFFFFFFFFFFFFFFFF')).toString() + "')"
       case Op.f32_const: return dataView.getFloat32(ast[ptr + 1], true) + ''
       case Op.f64_const: return dataView.getFloat64(ast[ptr + 1], true) + ''
 
@@ -687,13 +688,21 @@ export const compileCode = (
       case Op.TO_U32: return `${emit(ast[ptr + 1])}>>>0`
       case Op.TO_S64: return `l.${/* @__KEY__ */ 'u64_to_s64_'}(${emit(ast[ptr + 1])})`
 
-      case Op.i32_eqz: case Op.i64_eqz: return `${emit(ast[ptr + 1])}?0:1`
-      case Op.i32_eq: case Op.i64_eq: case Op.f32_eq: case Op.f64_eq: return `${emit(ast[ptr + 1])}===${emit(ast[ptr + 2])}`
-      case Op.i32_ne: case Op.i64_ne: case Op.f32_ne: case Op.f64_ne: return `${emit(ast[ptr + 1])}!==${emit(ast[ptr + 2])}`
-      case Op.i32_lt_s: case Op.i32_lt_u: case Op.i64_lt_s: case Op.i64_lt_u: case Op.f32_lt: case Op.f64_lt: return `${emit(ast[ptr + 1])}<${emit(ast[ptr + 2])}`
-      case Op.i32_gt_s: case Op.i32_gt_u: case Op.i64_gt_s: case Op.i64_gt_u: case Op.f32_gt: case Op.f64_gt: return `${emit(ast[ptr + 1])}>${emit(ast[ptr + 2])}`
-      case Op.i32_le_s: case Op.i32_le_u: case Op.i64_le_s: case Op.i64_le_u: case Op.f32_le: case Op.f64_le: return `${emit(ast[ptr + 1])}<=${emit(ast[ptr + 2])}`
-      case Op.i32_ge_s: case Op.i32_ge_u: case Op.i64_ge_s: case Op.i64_ge_u: case Op.f32_ge: case Op.f64_ge: return `${emit(ast[ptr + 1])}>=${emit(ast[ptr + 2])}`
+      case Op.i64_eqz: return `JSBI.EQ(${emit(ast[ptr + 1])}, 0)`
+      case Op.i64_eq: return `JSBI.equal(${emit(ast[ptr + 1])}, ${emit(ast[ptr + 2])})`
+      case Op.i64_ne: return `JSBI.notEqual(${emit(ast[ptr + 1])}, ${emit(ast[ptr + 2])})`
+      case Op.i64_lt_s: case Op.i64_lt_u: return `JSBI.lessThan(${emit(ast[ptr + 1])}, ${emit(ast[ptr + 2])})`
+      case Op.i64_gt_s: case Op.i64_gt_u: return `JSBI.greaterThan(${emit(ast[ptr + 1])}, ${emit(ast[ptr + 2])})`
+      case Op.i64_le_s: case Op.i64_le_u: return `JSBI.lessThanOrEqual(${emit(ast[ptr + 1])}, ${emit(ast[ptr + 2])})`
+      case Op.i64_ge_s: case Op.i64_ge_u: return `JSBI.greaterThanOrEqual(${emit(ast[ptr + 1])}, ${emit(ast[ptr + 2])})`
+
+      case Op.i32_eqz: return `${emit(ast[ptr + 1])}?0:1`
+      case Op.i32_eq: case Op.f32_eq: case Op.f64_eq: return `${emit(ast[ptr + 1])}===${emit(ast[ptr + 2])}`
+      case Op.i32_ne: case Op.f32_ne: case Op.f64_ne: return `${emit(ast[ptr + 1])}!==${emit(ast[ptr + 2])}`
+      case Op.i32_lt_s: case Op.i32_lt_u: case Op.f32_lt: case Op.f64_lt: return `${emit(ast[ptr + 1])}<${emit(ast[ptr + 2])}`
+      case Op.i32_gt_s: case Op.i32_gt_u: case Op.f32_gt: case Op.f64_gt: return `${emit(ast[ptr + 1])}>${emit(ast[ptr + 2])}`
+      case Op.i32_le_s: case Op.i32_le_u: case Op.f32_le: case Op.f64_le: return `${emit(ast[ptr + 1])}<=${emit(ast[ptr + 2])}`
+      case Op.i32_ge_s: case Op.i32_ge_u: case Op.f32_ge: case Op.f64_ge: return `${emit(ast[ptr + 1])}>=${emit(ast[ptr + 2])}`
 
       case Op.i32_clz: return `Math.clz32(${emit(ast[ptr + 1])})`
       case Op.i32_ctz: return `l.${/* @__KEY__ */ 'i32_ctz_'}(${emit(ast[ptr + 1])})`
@@ -715,19 +724,19 @@ export const compileCode = (
       case Op.i64_clz: return `l.${/* @__KEY__ */ 'i64_clz_'}(${emit(ast[ptr + 1])})`
       case Op.i64_ctz: return `l.${/* @__KEY__ */ 'i64_ctz_'}(${emit(ast[ptr + 1])})`
       case Op.i64_popcnt: return `l.${/* @__KEY__ */ 'i64_popcnt_'}(${emit(ast[ptr + 1])})`
-      case Op.i64_add: return `(${emit(ast[ptr + 1])}+${emit(ast[ptr + 2])})&0xFFFFFFFFFFFFFFFFn`
-      case Op.i64_sub: return `(${emit(ast[ptr + 1])}-${emit(ast[ptr + 2])})&0xFFFFFFFFFFFFFFFFn`
-      case Op.i64_mul: return `(${emit(ast[ptr + 1])}*${emit(ast[ptr + 2])})&0xFFFFFFFFFFFFFFFFn`
-      case Op.i64_div_s: return `${emit(ast[ptr + 1])}/${emit(ast[ptr + 2])}&0xFFFFFFFFFFFFFFFFn`
-      case Op.i64_div_u: return `${emit(ast[ptr + 1])}/${emit(ast[ptr + 2])}`
-      case Op.i64_rem_s: return `${emit(ast[ptr + 1])}%${emit(ast[ptr + 2])}&0xFFFFFFFFFFFFFFFFn`
-      case Op.i64_rem_u: return `${emit(ast[ptr + 1])}%${emit(ast[ptr + 2])}`
-      case Op.i64_and: return `${emit(ast[ptr + 1])}&${emit(ast[ptr + 2])}`
-      case Op.i64_or: return `${emit(ast[ptr + 1])}|${emit(ast[ptr + 2])}`
-      case Op.i64_xor: return `${emit(ast[ptr + 1])}^${emit(ast[ptr + 2])}`
-      case Op.i64_shl: return `${emit(ast[ptr + 1])}<<${emit(ast[ptr + 2])}&0xFFFFFFFFFFFFFFFFn`
-      case Op.i64_shr_s: return `l.${/* @__KEY__ */ 'u64_to_s64_'}(${emit(ast[ptr + 1])})>>${emit(ast[ptr + 2])}&0xFFFFFFFFFFFFFFFFn`
-      case Op.i64_shr_u: return `${emit(ast[ptr + 1])}>>${emit(ast[ptr + 2])}`
+      case Op.i64_add: return `JSBI.bitwiseAnd(JSBI.add(JSBI.BigInt(${emit(ast[ptr + 1])}), JSBI.BigInt(${emit(ast[ptr + 2])})), JSBI.BigInt('0xFFFFFFFFFFFFFFFF'))`
+      case Op.i64_sub: return `JSBI.bitwiseAnd(JSBI.subtract(${emit(ast[ptr + 1])}, ${emit(ast[ptr + 2])}), JSBI.BigInt('0xFFFFFFFFFFFFFFFF'))`
+      case Op.i64_mul: return `JSBI.bitwiseAnd(JSBI.multiply(${emit(ast[ptr + 1])}, ${emit(ast[ptr + 2])}), JSBI.BigInt('0xFFFFFFFFFFFFFFFF'))`
+      case Op.i64_div_s: return `JSBI.bitwiseAnd(JSBI.divide(${emit(ast[ptr + 1])}, ${emit(ast[ptr + 2])}), JSBI.BigInt('0xFFFFFFFFFFFFFFFF'))`
+      case Op.i64_div_u: return `JSBI.divide(${emit(ast[ptr + 1])}, ${emit(ast[ptr + 2])})`
+      case Op.i64_rem_s: return `JSBI.bitwiseAnd(JSBI.remainder(${emit(ast[ptr + 1])}, ${emit(ast[ptr + 2])}), JSBI.BigInt('0xFFFFFFFFFFFFFFFF'))`
+      case Op.i64_rem_u: return `JSBI.remainder(${emit(ast[ptr + 1])}, ${emit(ast[ptr + 2])})`
+      case Op.i64_and: return `JSBI.bitwiseAnd(${emit(ast[ptr + 1])}, ${emit(ast[ptr + 2])})`
+      case Op.i64_or: return `JSBI.bitwiseOr(${emit(ast[ptr + 1])}, ${emit(ast[ptr + 2])})`
+      case Op.i64_xor: return `JSBI.bitwiseXor(${emit(ast[ptr + 1])}, ${emit(ast[ptr + 2])})`
+      case Op.i64_shl: return `JSBI.bitwiseAnd(JSBI.leftShift(${emit(ast[ptr + 1])}, ${emit(ast[ptr + 2])}), JSBI.BigInt('0xFFFFFFFFFFFFFFFF'))`
+      case Op.i64_shr_s: return `l.${/* @__KEY__ */ 'u64_to_s64_'}(JSBI.bitwiseAnd(JSBI.signedRightShift(${emit(ast[ptr + 1])}), ${emit(ast[ptr + 2])}), JSBI.BigInt('0xFFFFFFFFFFFFFFFF'))`
+      case Op.i64_shr_u: return `JSBI.signedRightShift(${emit(ast[ptr + 1])}, ${emit(ast[ptr + 2])})`
       case Op.i64_rotl: return `l.${/* @__KEY__ */ 'i64_rotl_'}(${emit(ast[ptr + 1])},${emit(ast[ptr + 2])})`
       case Op.i64_rotr: return `l.${/* @__KEY__ */ 'i64_rotr_'}(${emit(ast[ptr + 1])},${emit(ast[ptr + 2])})`
 
@@ -746,12 +755,12 @@ export const compileCode = (
       case Op.f32_max: case Op.f64_max: return `Math.max(${emit(ast[ptr + 1])},${emit(ast[ptr + 2])})`
       case Op.f32_copysign: case Op.f64_copysign: return `l.${/* @__KEY__ */ 'copysign_'}(${emit(ast[ptr + 1])},${emit(ast[ptr + 2])})`
 
-      case Op.i32_wrap_i64: return `Number(${emit(ast[ptr + 1])}&0xFFFFFFFFn)|0`
+      case Op.i32_wrap_i64: return `JSBI.toNumber(JSBI.bitwiseAnd(JSBI.BigInt(${emit(ast[ptr + 1])}), JSBI.BigInt('0xFFFFFFFF')))|0`
       case Op.i32_trunc_f32_s: case Op.i32_trunc_f32_u: case Op.i32_trunc_f64_s: case Op.i32_trunc_f64_u: return `Math.trunc(${emit(ast[ptr + 1])})|0`
-      case Op.i64_extend_i32_s: return `BigInt(${emit(ast[ptr + 1])})`
-      case Op.i64_extend_i32_u: return `BigInt(${emit(ast[ptr + 1])}>>>0)`
-      case Op.i64_trunc_f32_s: case Op.i64_trunc_f32_u: case Op.i64_trunc_f64_s: case Op.i64_trunc_f64_u: return `BigInt(Math.trunc(${emit(ast[ptr + 1])}))&0xFFFFFFFFFFFFFFFFn`
-      case Op.f32_convert_i64_s: case Op.f32_convert_i64_u: case Op.f64_convert_i64_u: case Op.f64_convert_i64_s: return `Number(${emit(ast[ptr + 1])})`
+      case Op.i64_extend_i32_s: return `JSBI.BigInt(${emit(ast[ptr + 1])})`
+      case Op.i64_extend_i32_u: return `JSBI.BigInt(${emit(ast[ptr + 1])}>>>0)`
+      case Op.i64_trunc_f32_s: case Op.i64_trunc_f32_u: case Op.i64_trunc_f64_s: case Op.i64_trunc_f64_u: return `JSBI.bitwiseAnd(JSBI.BigInt(Math.trunc(${emit(ast[ptr + 1])})), JSBI.BigInt('0xFFFFFFFFFFFFFFFF'))`
+      case Op.f32_convert_i64_s: case Op.f32_convert_i64_u: case Op.f64_convert_i64_u: case Op.f64_convert_i64_s: return `JSBI.toNumber(${emit(ast[ptr + 1])})`
       case Op.i32_reinterpret_f32: return `l.${/* @__KEY__ */ 'i32_reinterpret_f32_'}(${emit(ast[ptr + 1])})`
       case Op.i64_reinterpret_f64: return `l.${/* @__KEY__ */ 'i64_reinterpret_f64_'}(${emit(ast[ptr + 1])})`
       case Op.f32_reinterpret_i32: return `l.${/* @__KEY__ */ 'f32_reinterpret_i32_'}(${emit(ast[ptr + 1])})`
@@ -916,7 +925,7 @@ export const compileCode = (
     for (let i = 0; i < count; i++) {
       const name = 't' + decls.length
       names.push(name)
-      decls.push(name + (type === Type.I64 ? '=0n' : '=0'))
+      decls.push(name + (type === Type.I64 ? '=JSBI.BigInt(0)' : '=0'))
     }
   }
 
@@ -1102,7 +1111,7 @@ export const compileCode = (
           astPtrs.push(astNextPtr)
           ast[astNextPtr++] = Op.i64_const | ((stackTop + 1) << Pack.OutSlotShift)
           ast[astNextPtr++] = constants.length
-          constants.push(63n)
+          constants.push(JSBI.BigInt(63))
           astPtrs.push(astNextPtr)
           ast[astNextPtr++] = Op.i64_and | (2 << Pack.ChildCountShift) | (stackTop << Pack.OutSlotShift)
           ast[astNextPtr++] = -stackTop
@@ -1361,11 +1370,12 @@ export const compileCode = (
   // Wrap the body with the arguments
   const name = JSON.stringify('wasm:' + (nameSection.get(funcIndex) || `function[${codeIndex}]`))
   const js = `return{${name}(${names.slice(0, argCount)}){var ${decls};${body}}}[${name}]`
+  // console.log(`OPTIMIZED: function test_${codeIndex}(${names.slice(0, argCount)}){var ${decls};${body}}`)
   return new Function('f', 'c', 't', 'g', 'l', js)(funcs, context, table, globals, library)
 }
 
 // This can pretty-print the expression subtree at "ptr" (for use with debugging)
-const debugPrintNode = (constants: bigint[], dataView: DataView, ptr: number, isNested = false): string => {
+const debugPrintNode = (constants: JSBI[], dataView: DataView, ptr: number, isNested = false): string => {
   if (ptr < 0) return `s${-ptr}`
   const ast = astBufferSingleton
   const node = ast[ptr]

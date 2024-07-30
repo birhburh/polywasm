@@ -8,6 +8,7 @@
 // using BigInts. Avoiding unnecessary BigInts gives a decent performance boost.
 
 import { Op, Pack } from './compile'
+import JSBI from 'jsbi';
 
 const enum Enable {
   Stats = 0, // Set this to 1 to enable statistics
@@ -149,7 +150,7 @@ type ReplacePayload =
 
 type Check =
   | Payload
-  | bigint
+  | JSBI
   | [Check, '===' | '!==' | '<' | '>' | '<=' | '>=' | '&' | '|' | '^', Check]
 
 interface Rule {
@@ -329,32 +330,32 @@ const rules: Rule[] = [
   {
     match_: [Op.i64_eq, [Op.i64_load8_u, 'x', 'P'], [Op.i64_const, 'Q']],
     replace_: [Op.i32_eq, [Op.i32_load8_u, 'x', 'P'], [Op.i32_const, [Edit.i64_to_i32, 'Q']]],
-    onlyIf_: ['Q', '<=', 0xFFn],
+    onlyIf_: ['Q', '<=', JSBI.BigInt(0xFF)],
   },
   {
     match_: [Op.i64_ne, [Op.i64_load8_u, 'x', 'P'], [Op.i64_const, 'Q']],
     replace_: [Op.i32_ne, [Op.i32_load8_u, 'x', 'P'], [Op.i32_const, [Edit.i64_to_i32, 'Q']]],
-    onlyIf_: ['Q', '<=', 0xFFn],
+    onlyIf_: ['Q', '<=', JSBI.BigInt(0xFF)],
   },
   {
     match_: [Op.i64_eq, [Op.i64_load16_u, 'x', 'P'], [Op.i64_const, 'Q']],
     replace_: [Op.i32_eq, [Op.i32_load16_u, 'x', 'P'], [Op.i32_const, [Edit.i64_to_i32, 'Q']]],
-    onlyIf_: ['Q', '<=', 0xFFFFn],
+    onlyIf_: ['Q', '<=', JSBI.BigInt(0xFFFF)],
   },
   {
     match_: [Op.i64_ne, [Op.i64_load16_u, 'x', 'P'], [Op.i64_const, 'Q']],
     replace_: [Op.i32_ne, [Op.i32_load16_u, 'x', 'P'], [Op.i32_const, [Edit.i64_to_i32, 'Q']]],
-    onlyIf_: ['Q', '<=', 0xFFFFn],
+    onlyIf_: ['Q', '<=', JSBI.BigInt(0xFFFF)],
   },
   {
     match_: [Op.i64_eq, [Op.i64_load32_u, 'x', 'P'], [Op.i64_const, 'Q']],
     replace_: [Op.i32_eq, [Op.i32_load, 'x', 'P'], [Op.i32_const, [Edit.i64_to_i32, 'Q']]],
-    onlyIf_: ['Q', '<=', 0xFFFFFFFFn],
+    onlyIf_: ['Q', '<=', JSBI.BigInt(0xFFFFFFFF)],
   },
   {
     match_: [Op.i64_ne, [Op.i64_load32_u, 'x', 'P'], [Op.i64_const, 'Q']],
     replace_: [Op.i32_ne, [Op.i32_load, 'x', 'P'], [Op.i32_const, [Edit.i64_to_i32, 'Q']]],
-    onlyIf_: ['Q', '<=', 0xFFFFFFFFn],
+    onlyIf_: ['Q', '<=', JSBI.BigInt(0xFFFFFFFF)],
   },
 
   // Optimize boolean operations
@@ -365,7 +366,7 @@ const rules: Rule[] = [
         // "if (x ? 1 : 0)" => "if (x)"
         { match_: [Op.BOOL_TO_INT, 'y'], replace_: [Op.BOOL, 'y'] },
         // "if (x ? 0 : 1)" => "if (!x)"
-        { match_: [['@', Op.i32_eqz, Op.i64_eqz], 'x'], replace_: [Op.BOOL_NOT, 'y'] },
+        { match_: [Op.i32_eqz, 'x'], replace_: [Op.BOOL_NOT, 'y'] },
       ],
     },
   },
@@ -376,7 +377,7 @@ const rules: Rule[] = [
         // "if (!(x ? 1 : 0))" => "if (!x)"
         { match_: [Op.BOOL_TO_INT, 'y'], replace_: [Op.BOOL_NOT, 'y'] },
         // "if (!(x ? 0 : 1)" => "if (x)"
-        { match_: [['@', Op.i32_eqz, Op.i64_eqz], 'y'], replace_: [Op.BOOL, 'y'] },
+        { match_: [Op.i32_eqz, 'y'], replace_: [Op.BOOL, 'y'] },
         // "if (!(x === 0))" => "if (x !== 0)" (note: does not apply to floating-point due to NaN)
         { match_: [Op.i32_eq, 'y', 'z'], replace_: [Op.BOOL, [Op.i32_ne, 'y', 'z']] },
         { match_: [Op.i32_ne, 'y', 'z'], replace_: [Op.BOOL, [Op.i32_eq, 'y', 'z']] },
@@ -426,7 +427,7 @@ const rules: Rule[] = [
         {
           match_: [Op.i64_const, 'P'],
           replace_: [Op.i64_const, 'P'],
-          onlyIf_: ['P', '<=', 0x7FFF_FFFF_FFFF_FFFFn],
+          onlyIf_: ['P', '<=', JSBI.BigInt('0x7FFFFFFFFFFFFFFF')],
         },
         {
           match_: [['$', Op.i64_load8_u, Op.i64_load16_u, Op.i64_load32_u], 'y', 'P'],
@@ -493,32 +494,32 @@ const rules: Rule[] = [
         {
           match_: [Op.i64_load8_u, 'y', 'Q'],
           replace_: [Op.i64_load8_u, 'y', 'Q'],
-          onlyIf_: [['P', '&', 0xFFn], '===', 0xFFn],
+          onlyIf_: [['P', '&', JSBI.BigInt(0xFF)], '===', JSBI.BigInt(0xFF)],
         },
         {
           match_: [Op.i64_load8_s, 'y', 'Q'],
           replace_: [Op.i64_load8_u, 'y', 'Q'],
-          onlyIf_: ['P', '===', 0xFFn],
+          onlyIf_: ['P', '===', JSBI.BigInt(0xFF)],
         },
         {
           match_: [Op.i64_load16_u, 'y', 'Q'],
           replace_: [Op.i64_load16_u, 'y', 'Q'],
-          onlyIf_: [['P', '&', 0xFFFFn], '===', 0xFFFFn],
+          onlyIf_: [['P', '&', JSBI.BigInt(0xFFFF)], '===', JSBI.BigInt(0xFFFF)],
         },
         {
           match_: [Op.i64_load16_s, 'y', 'Q'],
           replace_: [Op.i64_load16_u, 'y', 'Q'],
-          onlyIf_: ['P', '===', 0xFFFFn],
+          onlyIf_: ['P', '===', JSBI.BigInt(0xFFFF)],
         },
         {
           match_: [Op.i64_load32_u, 'y', 'Q'],
           replace_: [Op.i64_load32_u, 'y', 'Q'],
-          onlyIf_: [['P', '&', 0xFFFF_FFFFn], '===', 0xFFFF_FFFFn],
+          onlyIf_: [['P', '&', JSBI.BigInt(0xFFFF_FFFF)], '===', JSBI.BigInt(0xFFFF_FFFF)],
         },
         {
           match_: [Op.i64_load32_s, 'y', 'Q'],
           replace_: [Op.i64_load32_u, 'y', 'Q'],
-          onlyIf_: ['P', '===', 0xFFFF_FFFFn],
+          onlyIf_: ['P', '===', JSBI.BigInt(0xFFFF_FFFF)],
         },
       ],
     },
@@ -529,7 +530,7 @@ const rules: Rule[] = [
 // code that does the subtree matching and replacement. This only needs to be
 // done once. The rules are compiled instead of interpreted to improve compile
 // speed, as these rules are applied to every node that the compiler generates.
-export const compileOptimizations = (): (ast: Int32Array, constants: bigint[], allocateNode: (node: number, length: number) => number, ptr: number) => number => {
+export const compileOptimizations = (): (ast: Int32Array, constants: JSBI[], allocateNode: (node: number, length: number) => number, ptr: number) => number => {
   type PlaceholderMap = Partial<Record<Expr | Payload, string>>
 
   interface ReusableNode {
@@ -661,12 +662,50 @@ export const compileOptimizations = (): (ast: Int32Array, constants: bigint[], a
     if (onlyIf) {
       const compileCheck = (onlyIf: Check): string => {
         if (typeof onlyIf === 'string') {
-          return `${constantsVar}[${placeholderVars[onlyIf] || placeholderExprs[onlyIf]}]&0xFFFFFFFFFFFFFFFFn`
+          return `JSBI.bitwiseAnd(JSBI.BigInt(${constantsVar}[${placeholderVars[onlyIf] || placeholderExprs[onlyIf]}]), JSBI.BigInt('0xFFFFFFFFFFFFFFFF'))`
         }
-        if (typeof onlyIf === 'bigint') {
-          return onlyIf + 'n'
+        if (onlyIf instanceof JSBI) {
+          return "JSBI.BigInt('" + onlyIf.toString() + "')"
         }
-        return `(${compileCheck(onlyIf[0])})${onlyIf[1]}(${compileCheck(onlyIf[2])})`
+        if (onlyIf[0] instanceof JSBI || onlyIf[2] instanceof JSBI)
+        {
+          var op;
+          switch (onlyIf[1]) {
+            case '===':
+              op = "EQ"
+              break;
+            case '!==':
+              op = "NE"
+              break;
+            case '<':
+              op = "LT"
+              break;
+            case '>':
+              op = "GT"
+              break;
+            case '<=':
+              op = "LE"
+              break;
+            case '>=':
+              op = "GE"
+              break;
+            case '&':
+              op = "bitwiseAnd"
+              break;
+            case '|':
+              op = "bitwiseOr"
+              break;
+            case '^':
+              op = "bitwiseXor"
+              break;
+
+            default:
+              throw new Error('Unsupported JSBI operator: ' + onlyIf[1])
+          }
+          return `JSBI.${op}(${compileCheck(onlyIf[0])}, ${compileCheck(onlyIf[2])})`
+        }
+        else
+          return `(${compileCheck(onlyIf[0])})${onlyIf[1]}(${compileCheck(onlyIf[2])})`
       }
       code += `if(${compileCheck(onlyIf)}){`
       then()
@@ -689,7 +728,7 @@ export const compileOptimizations = (): (ast: Int32Array, constants: bigint[], a
 
     if (replace[0] === Edit.i64_to_i32) {
       const operand = constructReplacement(replace[1], placeholderVars, reusableNodes)
-      return `Number(${constantsVar}[${operand}]&0xFFFFFFFFn)`
+      return `JSBI.toNumber(JSBI.bitwiseAnd(JSBI.BigInt(${constantsVar}[${operand}]), JSBI.BigInt('0xFFFFFFFF')))`
     }
 
     if (replace[0] === Edit.i32_add) {
@@ -706,7 +745,7 @@ export const compileOptimizations = (): (ast: Int32Array, constants: bigint[], a
       }
       const operand1 = constructReplacement(replace1, placeholderVars, reusableNodes)
       const operand2 = constructReplacement(replace[2], placeholderVars, reusableNodes)
-      code += `${constantsVar}[${operand1}]&=${constantsVar}[${operand2}];`
+      code += `${constantsVar}[${operand1}]=JSBI.bitwiseAnd(${constantsVar}[${operand1}], ${constantsVar}[${operand2}]);`
       return operand1
     }
 
@@ -797,6 +836,8 @@ export const compileOptimizations = (): (ast: Int32Array, constants: bigint[], a
   let code = `for(;;){var ${rootOpVar}=${astVar}[${rootPtrVar}]&${Pack.OpMask};`
   compileRules(rootPtrVar, rootOpVar, rules, Enable.Stats ? matchToStatName : null, [], {})
   code += `return ${rootPtrVar}}`
+
+  // console.log(`COMPILED OPTIMIZATIONS: function(${astVar},${constantsVar},${allocateNode},${rootPtrVar}){${code}}`)
   return Enable.Stats
     ? new Function(recordStatsVar, `return(${astVar},${constantsVar},${allocateNode},${rootPtrVar})=>{${code}}`)(recordStats)
     : new Function(astVar, constantsVar, allocateNode, rootPtrVar, code)

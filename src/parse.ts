@@ -6,6 +6,7 @@
 // https://webassembly.github.io/spec/core/binary/index.html
 
 import { Op } from './compile'
+import JSBI from 'jsbi';
 
 const enum Section {
   Custom,
@@ -70,7 +71,7 @@ export type CustomItem = readonly [name: string, bytes: Uint8Array]
 export type DataItem = readonly [memory: number, offset: number, data: Uint8Array]
 export type ElementItem = readonly [offset: number, indices: readonly number[]]
 export type ExportItem = readonly [name: string, desc: Desc, index: number]
-export type GlobalItem = readonly [type: Type, mutable: Mutable, initializer: (globals: (number | bigint)[]) => number | bigint]
+export type GlobalItem = readonly [type: Type, mutable: Mutable, initializer: (globals: (number | JSBI)[]) => number | JSBI]
 export type ImportItem =
   | readonly [module: string, name: string, desc: Desc.Func, index: number]
   | readonly [module: string, name: string, desc: Desc.Table, type: Type, min: number, max: number]
@@ -128,16 +129,16 @@ const parse = (bytes: Uint8Array): WASM => {
     return shift < 32 && (byte & 0x40) ? value | (~0 << shift) : value
   }
 
-  const readI64LEB = (): bigint => {
-    let value = 0n
-    let shift = 0n
+  const readI64LEB = (): JSBI => {
+    let value = JSBI.BigInt(0)
+    let shift = JSBI.BigInt(0)
     let byte: number
     do {
       byte = bytes[ptr++]
-      value |= BigInt(byte & 0x7F) << shift
-      shift += 7n
+      value = JSBI.bitwiseOr(value, JSBI.leftShift(JSBI.BigInt(byte & 0x7F), shift))
+      shift = JSBI.add(shift, JSBI.BigInt(7))
     } while (byte & 0x80)
-    return shift < 64 && (byte & 0x40) ? value | (~0n << shift) : value
+    return JSBI.LT(shift, 64) && (byte & 0x40) ? JSBI.bitwiseOr(value, JSBI.leftShift(JSBI.bitwiseNot(JSBI.BigInt(0)), shift)) : value
   }
 
   const readF32 = (): number => {
@@ -173,9 +174,9 @@ const parse = (bytes: Uint8Array): WASM => {
     return value
   }
 
-  const readInitializer = (): (globals: (number | bigint)[]) => number | bigint => {
+  const readInitializer = (): (globals: (number | JSBI)[]) => number | JSBI => {
     const op: Op = bytes[ptr++]
-    let initializer: (globals: (number | bigint)[]) => number | bigint
+    let initializer: (globals: (number | JSBI)[]) => number | JSBI
     if (op === Op.i32_const) {
       const value = readI32LEB()
       initializer = () => value
